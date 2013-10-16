@@ -1,0 +1,321 @@
+#!/bin/bash
+# Copyright (C) 2013 The Android Open Source Project
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# Created by Richie.Wang, 2013.10.06
+
+prog="$0"
+while [ -h "${prog}" ]; do
+    newProg=`/bin/ls -ld "${prog}"`
+    echo ${newProg}
+
+    newProg=`expr "${newProg}" : ".* -> \(.*\)$"`
+    if expr "x${newProg}" : 'x/' >/dev/null; then
+        prog="${newProg}"
+    else
+        progdir=`dirname "${prog}"`
+        prog="${progdir}/${newProg}"
+    fi
+done
+oldwd=`pwd`
+progdir=`dirname "${prog}"`
+cd "${progdir}"
+progdir=`pwd`
+prog="${progdir}"/`basename "${prog}"`
+cd "${oldwd}"
+
+
+APKTOOL="${progdir}/apktool/apktool"
+SMALITOOL="${progdir}/smali4dex/smali"
+BAKSMALITOOL="${progdir}/smali4dex/baksmali"
+DEX2JARTOOL="${progdir}/dex2jar/d2j-dex2jar.sh"	
+JAR2JAVATOOL="${progdir}/jad/jad"
+
+
+function usage() {
+cat <<EOF
+Decompile a android apk or a optimized odex apk compiled with user tag. 
+
+Usage: decompile [options] <apk-file|odex-file>
+
+  -f <framewrok-odexs-dir>, --fodexs=<framework-odexs-dir>     
+                        -- the base folder to look for the framework odex
+                           files when decomile a odex apk or just the odex file.
+                           Defaults to the PROGRAM_DIR/fodexs directory
+
+  -h, --help            -- print this help and exit
+
+When build with user tag, it will generate a small apk containing resources
+and a odex file containing code. So this tool will decompile resources and
+code if the argument is apk file, and just decompile code if argument is odex
+file.
+
+To decompile a odex file, it also needs a few of framework odex files. What
+framework odex files needed depend on the odex apk you are decompiling. In
+other words, different odex apk needs different framework odex files. The
+most used framework odex files are android.policy.odex, bouncycastle.odex,
+core.odex, pm.odex, core-junit.odex, ext.odex, services.odex, those you can
+get from /system/framework/ in the device at which your odex apk is compiled
+armed. The tool will give you tips when needed framework odex not fond.
+
+
+Output:
+  All files are saved in the directory named <apk> in current directory.
+
+   src.jar                 -- source code formed in jar, open it with jd-gui
+   src/                    -- source code formed in java
+   res/                    -- resoures and so on
+   AndroidManifest.xml     -- the android manifest file
+
+Sample:
+  1.
+       decompile demo.apk 
+  
+  It will try to decompile resources and code whether it is built with user
+  tag or not. Put demo.odex file in the same directory if it is built with
+  user tag, or it just decompile resources.
+
+  2.
+       decompile -f odexs demo.apk 
+
+  It is same as sample 1, except looking for framework odex files from the
+  specified directory.
+
+  3.
+       decompile demo.odex 
+
+  It will just decompile code, and looking for framework odex files from the
+  default directory.
+
+  4.
+       decompile -f odexs demo.odex
+  
+  It is same as sample 3, except looking for framework odex files from the 
+  specified directory.
+
+Author:
+  Written by Richie Wang
+
+Reporting bugs:
+  Report decompile bugs to decompile4android@gmail.com
+
+EOF
+}
+
+function dex2code() {
+	echo 
+	echo "PHASE : Dex2code"
+	echo
+	local dex=classes.dex
+	if [ -n "$1" ]; then
+		dex="$1"
+	fi
+
+	"$DEX2JARTOOL" "$dex" -o src.jar -ts -f
+	
+	if [ $? != 0 ]; then
+		echo "Decompile to jar FAILED."
+		return 1
+	fi
+
+	rm -rf tree
+
+	echo "jad $(pwd)/src.jar -> src/"
+	unzip -q src.jar -d tree
+	"$JAR2JAVATOOL" -o -r -ff -dead -sjava -dsrc tree/**/*.class 2>/dev/null
+	local ret=$?
+	rm -rf tree
+	return "$ret"
+}
+
+function reverse_apk() {
+	if [ -z "$FILENAME" ]; then
+		echo "Error: file name is NULL."
+		return 1;
+	fi
+	
+	if [ -e "$FILENAME" ]; then
+		rm -rf "$FILENAME"
+		if [ $? != 0 ]; then
+			echo "Error: delete $FILENAME FAILED."
+			return 1
+		fi
+	fi
+
+	echo
+	echo "PHASE : Decompile resources"
+	echo
+
+	# Decompile resources
+	"$APKTOOL" d -s "$FILEPATH" "$FILENAME"
+
+	if [ $? != 0 ]; then
+		echo
+		echo "Decompile resources FAILED."
+	fi
+
+	if [ ! -e "$FILENAME" ]; then
+		# Decompile resoures failed.
+		mkdir "$FILENAME"
+	fi
+
+	echo
+	echo "PHASE : Decompile code"
+	echo
+
+	# local oldPos=`pwd`
+	cd "$FILENAME"
+	# Decompile code 
+	unzip -q -o "$FILEPATH" classes.dex
+
+	if [ $? != 0 ]; then
+		# May be error or built with user tag.
+		# echo "classes.dex not found."
+
+		local pOdexFile=
+		for tf in `ls "${FILEPATH%.*}".*`
+		do
+			# FIXME This should be $FILENAME.odex.
+			if expr "$tf" : '.*\.\([oO][dD][eE][xX]\)$' > /dev/null; then
+				pOdexFile="$tf"
+				break;
+			fi
+		done
+		if [ -r "$pOdexFile" ]; then
+			reverse_odex "$pOdexFile"
+			return $?
+		fi
+
+		echo
+		echo "$FILENAME.odex not found."
+		echo "Decompile code FAILED."
+		return 1
+	else
+		local pDexFile=`pwd`/classes.dex
+		dex2code "$pDexFile"
+		local ret=$?
+		rm classes.dex
+		return "$ret"
+	fi
+
+	# cd ${oldPos}
+	
+}
+
+function reverse_odex() {
+	echo
+	echo "PHASE : Odex2dex"
+	echo
+	if [ ! -r "$1" ]; then
+		echo "$1 not found."
+		return 1
+	fi
+
+	rm -rf out
+	rm classes.dex
+
+	"$BAKSMALITOOL" -d "$SYS_ODEX_DIR" -x "$1"
+	if [ $? != 0 ]; then
+		echo "Baksmali FAILED."
+		echo "Decompile code FAILED"
+		return 1
+	fi
+
+	"$SMALITOOL" out -o classes.dex
+	if [ $? != 0 ]; then
+		echo "Smali FAILED."
+		echo "Decompile code FAILED"
+		return 1;
+	fi
+
+	local tmpfile=`pwd`/classes.dex
+	dex2code "$tmpfile"
+	local ret=$?
+
+	rm -rf out
+	rm classes.dex
+	return "$ret";
+}
+
+SYS_ODEX_DIR="${progdir}/fodexs"
+# SCRIPTNAME="${0##*/}"
+
+TEMP=`getopt -o f:h --long help,fodexs: -n "${0##*/}" -- "$@"`
+
+if [ $? != 0 ] ; then 
+#	echo "Error" >&2
+	exit 1  
+fi
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$TEMP"
+
+while true ; do
+	case "$1" in
+		-h|--help) usage ; exit 0 ;;
+
+		-f|--fodexs) 
+			if [ -d "$2" -a -r "$2" ]; then
+				# Use absolute path
+				oldwd=`pwd`
+				cd "$2"
+				SYS_ODEX_DIR=`pwd`
+				cd "$oldwd"
+			else
+				SYS_ODEX_DIR=
+			fi
+			shift 2 ;;
+
+		--) shift ; break ;;
+
+		*) echo "Error: $1 is invalid argument!" ; exit 1 ;;
+	esac
+done
+
+if [ ! -r "$1" ]; then
+	echo "Error: no valid file to decompile."
+	exit 1
+fi
+
+# Use absolute path
+FULLNAME="${1##*/}"
+oldwd=`pwd`
+cd `dirname "$1"`
+export FILEPATH=`pwd`/"$FULLNAME"
+export FILENAME="${FULLNAME%.*}"
+export SYS_ODEX_DIR
+cd "$oldwd"
+
+# Just for debug
+# echo "$FULLNAME"
+# echo "$FILENAME"
+
+# Whether it is formed in xx.apk/odex
+if expr "$FULLNAME" : '.*\.\([aA][pP][kK]\)$' > /dev/null; then
+	reverse_apk 
+elif expr "$FULLNAME" : '.*\.\([oO][dD][eE][xX]\)$' > /dev/null; then
+	if [ ! -e "$FILENAME" ]; then
+		mkdir "$FILENAME"
+	fi
+	cd "$FILENAME"
+	reverse_odex "$FILEPATH"
+else
+	echo "The decompiled file is not supported."
+	exit 1
+fi
+res=$?
+echo 
+echo "Finished"
+echo
+exit "$res"

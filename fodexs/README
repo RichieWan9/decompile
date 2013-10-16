@@ -1,0 +1,2 @@
+The default directory to looking for framework odex files 
+when decompile a odex file or a apk built with user tag.
