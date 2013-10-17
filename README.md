@@ -1,6 +1,7 @@
-Decompile a android apk or a optimized odex apk compiled with user tag. 
+Decompile a android apk, framework jar or a optimized odex apk compiled 
+with user tag. 
 
-Usage: decompile [options] <apk-file|odex-file>
+Usage: decompile [options] <apk-file|jar-file|odex-file>
 
   -f <framewrok-odexs-dir>, --fodexs=<framework-odexs-dir>     
                         -- the base folder to look for the framework odex
@@ -8,6 +9,9 @@ Usage: decompile [options] <apk-file|odex-file>
                            Defaults to the PROGRAM_DIR/fodexs directory
 
   -h, --help            -- print this help and exit
+
+Framework resources is formed in apk and code is formed in jar if not build
+with user tag. The tool can decompile both of them.
 
 When build with user tag, it will generate a small apk containing resources
 and a odex file containing code. So this tool will decompile resources and
@@ -56,6 +60,16 @@ Sample:
   
   It is same as sample 3, except looking for framework odex files from the 
   specified directory.
+  
+  5.
+      decompile framework-res.apk
+  
+  It will decompile framework resources.
+
+  6.
+      decompile framework.jar
+
+  It will decompile framework code.
 
 Author:
   Written by Richie Wang

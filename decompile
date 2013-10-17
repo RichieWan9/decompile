@@ -45,9 +45,10 @@ JAR2JAVATOOL="${progdir}/jad/jad"
 
 function usage() {
 cat <<EOF
-Decompile a android apk or a optimized odex apk compiled with user tag. 
+Decompile a android apk, framework jar or a optimized odex apk compiled 
+with user tag. 
 
-Usage: decompile [options] <apk-file|odex-file>
+Usage: decompile [options] <apk-file|jar-file|odex-file>
 
   -f <framewrok-odexs-dir>, --fodexs=<framework-odexs-dir>     
                         -- the base folder to look for the framework odex
@@ -55,6 +56,9 @@ Usage: decompile [options] <apk-file|odex-file>
                            Defaults to the PROGRAM_DIR/fodexs directory
 
   -h, --help            -- print this help and exit
+
+Framework resources is formed in apk and code is formed in jar if not build
+with user tag. The tool can decompile both of them.
 
 When build with user tag, it will generate a small apk containing resources
 and a odex file containing code. So this tool will decompile resources and
@@ -103,6 +107,16 @@ Sample:
   
   It is same as sample 3, except looking for framework odex files from the 
   specified directory.
+  
+  5.
+      decompile framework-res.apk
+  
+  It will decompile framework resources.
+
+  6.
+      decompile framework.jar
+
+  It will decompile framework code.
 
 Author:
   Written by Richie Wang
@@ -248,6 +262,33 @@ function reverse_odex() {
 	return "$ret";
 }
 
+function reverse_jar() {
+	if [ ! -e "$FILENAME" ]; then
+		# Whatever create direcotry
+		mkdir "$FILENAME"
+	fi
+
+	echo
+	echo "PHASE : Decompile code"
+	echo
+
+	# local oldPos=`pwd`
+	cd "$FILENAME"
+	
+	# Decompile code 
+	unzip -q -o "$FILEPATH" classes.dex
+
+	if [ $? = 0 ]; then
+		local pDexFile=`pwd`/classes.dex
+		dex2code "$pDexFile"
+		local ret=$?
+		rm classes.dex
+		return "$ret"
+	fi
+
+	return 1
+}
+
 SYS_ODEX_DIR="${progdir}/fodexs"
 # SCRIPTNAME="${0##*/}"
 
@@ -304,6 +345,8 @@ cd "$oldwd"
 # Whether it is formed in xx.apk/odex
 if expr "$FULLNAME" : '.*\.\([aA][pP][kK]\)$' > /dev/null; then
 	reverse_apk 
+elif expr "$FULLNAME" : '.*\.\([jJ][aA][rR]\)$' > /dev/null; then
+	reverse_jar 
 elif expr "$FULLNAME" : '.*\.\([oO][dD][eE][xX]\)$' > /dev/null; then
 	if [ ! -e "$FILENAME" ]; then
 		mkdir "$FILENAME"
